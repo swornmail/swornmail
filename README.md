@@ -24,3 +24,6 @@ Report privately to security@swornmail.dev (see the spec repo's
 ## License
 
 Apache-2.0 (see `LICENSE`).
+
+Maintained by [PlatOps Security, LLC](https://platops.com). Copyright:
+see `NOTICE`.
