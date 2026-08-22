@@ -9,6 +9,8 @@ repository = "https://github.com/swornmail/swornmail"
 homepage = "https://swornmail.dev"
 keywords = ["email", "smtp", "ipv6", "reputation", "attestation"]
 categories = ["email"]
+# The differential-test bin is dev tooling (gate B), not part of the crate.
+exclude = ["src/bin/difftest.rs"]
 
 [dependencies]
 base64 = "0.22"
