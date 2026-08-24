@@ -1,0 +1,82 @@
+name: Public boundary
+
+# This repository is public and carries the open SwornMail protocol.
+#
+# The reputation feed, any customer console, and anything behind a paid tier or
+# a login are commercial and live in a private repository. That boundary has
+# been held by everyone remembering it; this is the backstop.
+#
+# It runs before merge because a leak here is not revertible in any useful
+# sense: content is public the moment it is pushed, and rewriting history does
+# not recall what was already fetched, forked, or indexed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: No private-side identifiers
+        run: |
+          # Names that exist only on the commercial side. Any occurrence in a
+          # public repository is a boundary failure.
+          #
+          # Deliberately NOT matched: "commercial", "feed" and "reputation" on
+          # their own. The protocol legitimately discusses reputation, and the
+          # Apache licence text contains "commercial damages"; banning the
+          # vocabulary would produce noise, not safety. The company name
+          # "PlatOps Security, LLC" is also allowed — it is the maintainer
+          # credit every repository in the org carries. Only the org slug is
+          # treated as private-side.
+          patterns='sworn-feed|sworn_feed|sworn\.platops\.com|platops-security|SWORN_FEED_|submitter-keys'
+
+          if git grep -nIE "$patterns" -- . ':!.github/workflows/public-boundary.yml' > /tmp/hits; then
+            echo "::error::private-side identifiers found in a PUBLIC repository"
+            cat /tmp/hits
+            echo
+            echo "The feed, its console, and anything behind a paid tier or login"
+            echo "belong in a private repo under the commercial org."
+            exit 1
+          fi
+          echo "no private-side identifiers"
+
+      - name: No credentials committed
+        run: |
+          # Cheap checks for the things that would actually hurt. Not a
+          # substitute for secret scanning, which GitHub runs separately.
+          #
+          # Test keys are excluded by path, not by weakening the pattern: the
+          # conformance vectors legitimately contain a published Ed25519 seed,
+          # which is the point of a test vector.
+          patterns='AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[0-9A-Za-z-]{10,}|postgres(ql)?://[^ "]*:[^ "@]*@'
+
+          if git grep -nIE "$patterns" -- . \
+               ':!.github/workflows/public-boundary.yml' \
+               ':!test-vectors/**' ':!**/testdata/**' > /tmp/creds; then
+            echo "::error::possible credential committed to a PUBLIC repository"
+            cat /tmp/creds
+            exit 1
+          fi
+          echo "no credential patterns"
+
+      - name: No claim of adopters while there are none
+        run: |
+          # SwornMail has no public deployments. If that changes, the copy
+          # should change because Val decided it, not because a marketing
+          # phrase drifted in from a template.
+          if git grep -nIE 'trusted by|used by [0-9]|our customers|thousands of' -- . \
+               ':!.github/workflows/public-boundary.yml' > /tmp/claims; then
+            echo "::error::public material implies adoption that does not exist"
+            cat /tmp/claims
+            exit 1
+          fi
+          echo "no unsupported adoption claims"
