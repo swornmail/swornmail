@@ -37,5 +37,5 @@ Report privately to security@swornmail.dev (see the spec repo's
 
 Apache-2.0 (see `LICENSE`).
 
-Maintained by [PlatOps Security, LLC](https://platops.com). Copyright:
+Maintained by Val Kafedzhy. Copyright:
 see `NOTICE`.

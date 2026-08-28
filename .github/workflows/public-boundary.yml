@@ -33,10 +33,9 @@ jobs:
           # Deliberately NOT matched: "commercial", "feed" and "reputation" on
           # their own. The protocol legitimately discusses reputation, and the
           # Apache licence text contains "commercial damages"; banning the
-          # vocabulary would produce noise, not safety. The company name
-          # "PlatOps Security, LLC" is also allowed — it is the maintainer
-          # credit every repository in the org carries. Only the org slug is
-          # treated as private-side.
+          # vocabulary would produce noise, not safety. No company name appears
+          # in public material at all as of 2026-08-28 — the maintainer credit
+          # is personal. Only the org slug is treated as private-side.
           patterns='sworn-feed|sworn_feed|sworn\.platops\.com|platops-security|SWORN_FEED_|submitter-keys'
 
           if git grep -nIE "$patterns" -- . ':!.github/workflows/public-boundary.yml' > /tmp/hits; then
