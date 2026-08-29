@@ -13,6 +13,9 @@ pub const PASS: &str = "pass";
 /// Every variant maps to one of the reason tokens used in the shared test
 /// vectors and in `Authentication-Results` diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// Non-exhaustive: reason codes are an advisory diagnostic vocabulary that
+// grows with the draft, so adding one must not break a downstream `match`.
+#[non_exhaustive]
 pub enum Reason {
     /// Source address is not inside the attested prefix.
     OffPrefix,
@@ -33,6 +36,10 @@ pub enum Reason {
     BadPrefix,
     /// `exp` is not greater than `iat`.
     BadValidity,
+    /// The signed prefix is not covered by the operator policy enumeration.
+    UnauthorizedPrefix,
+    /// The token unit does not equal the separately published policy unit.
+    PolicyUnitMismatch,
     /// Protected content type is absent or not `application/sworn-token+cbor`.
     BadContentType,
     /// Protected `kid` is absent or is not a conforming single DNS label.
@@ -61,6 +68,8 @@ impl Reason {
             Reason::BadUnit => "bad_unit",
             Reason::BadPrefix => "bad_prefix",
             Reason::BadValidity => "bad_validity",
+            Reason::UnauthorizedPrefix => "unauthorized_prefix",
+            Reason::PolicyUnitMismatch => "policy_unit_mismatch",
             Reason::BadContentType => "bad_content_type",
             Reason::BadKid => "bad_kid",
             Reason::HeaderConfusion => "header_confusion",

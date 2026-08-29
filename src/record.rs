@@ -99,7 +99,16 @@ impl PolicyRecord {
         if let Some(list) = get(&tags, "p") {
             // Prefixes past the 64th are ignored, not validated: the draft
             // caps the work a verifier does on an oversized record.
-            for entry in list.split(',').take(MAX_POLICY_PREFIXES) {
+            // Empty elements are skipped, not rejected, and do not count
+            // against the cap — matching the Go reference and the Lua module.
+            // A trailing comma is sloppy, not hostile, and three parsers
+            // disagreeing about it is now an authorization difference rather
+            // than a lint difference.
+            for entry in list
+                .split(',')
+                .filter(|entry| !entry.is_empty())
+                .take(MAX_POLICY_PREFIXES)
+            {
                 let prefix: Ipv6Prefix = entry.parse().map_err(|_| RecordError::BadValue("p"))?;
                 if !prefix.is_attestable() {
                     return Err(RecordError::BadValue("p"));
@@ -125,16 +134,17 @@ impl PolicyRecord {
 
         let rua = match get(&tags, "rua") {
             Some(value) => {
-                let address = value
-                    .strip_prefix("mailto:")
-                    .ok_or(RecordError::BadValue("rua"))?;
-                if address.is_empty() {
+                if !valid_rua(value) {
                     return Err(RecordError::BadValue("rua"));
                 }
                 Some(value.to_owned())
             }
             None => None,
         };
+
+        if prefixes.iter().any(|prefix| unit < prefix.prefix_len()) {
+            return Err(RecordError::BadValue("u"));
+        }
 
         Ok(PolicyRecord {
             prefixes,
@@ -143,11 +153,44 @@ impl PolicyRecord {
             rua,
         })
     }
+
+    /// Whether this policy explicitly authorizes a signed token prefix.
+    /// A broader policy prefix may authorize a more specific token prefix,
+    /// but a narrow enumeration never authorizes its parent.
+    pub fn authorizes(&self, token_prefix: Ipv6Prefix) -> bool {
+        token_prefix.is_attestable()
+            && self.prefixes.iter().any(|allowed| {
+                allowed.is_attestable()
+                    && token_prefix.prefix_len() >= allowed.prefix_len()
+                    && allowed.contains(token_prefix.addr())
+            })
+    }
 }
 
 /// Splits a record into `(name, value)` tags, enforcing the shared rules:
 /// `v=SWORN1` first, no repeated tag name, no whitespace inside a value.
 fn parse_tags(txt: &str) -> Result<Vec<(&str, &str)>, RecordError> {
+    // A SwornMail record is printable ASCII by construction: domains are LDH,
+    // prefixes and units are digits and punctuation, rua is a dot-atom. So the
+    // rule is the simplest one three implementations can agree on exactly —
+    // reject every byte outside 0x20..=0x7E, plus HTAB.
+    //
+    // "Whitespace" is where parsers silently disagree: Go's unicode.IsSpace
+    // covers U+00A0 and U+3000, Lua's %s is byte-wise, and this crate's
+    // is_ascii_whitespace excludes VT. The same record then parses differently
+    // in three places. Restricting the record to an explicit octet set removes
+    // the disagreement at its source, and takes CR, LF, NUL, DEL and every
+    // other C0 control with it.
+    //
+    // HTAB is admitted because a hand-edited zone file legitimately contains
+    // one between tags, and all three implementations already strip it there
+    // and reject it inside a value.
+    if txt
+        .bytes()
+        .any(|byte| byte != b'\t' && !(0x20..=0x7e).contains(&byte))
+    {
+        return Err(RecordError::MalformedTag);
+    }
     let mut tags: Vec<(&str, &str)> = Vec::new();
     for segment in txt.split(';') {
         let segment = segment.trim();
@@ -157,7 +200,10 @@ fn parse_tags(txt: &str) -> Result<Vec<(&str, &str)>, RecordError> {
         let (name, value) = segment.split_once('=').ok_or(RecordError::MalformedTag)?;
         let (name, value) = (name.trim(), value.trim());
         // The segment is already trimmed, so any whitespace left is internal.
-        if name.is_empty() || value.bytes().any(|c| c.is_ascii_whitespace()) {
+        // Only SP and HTAB survive the octet gate above, and those are
+        // exactly what "whitespace" means here — is_ascii_whitespace
+        // would be wrong twice over, admitting FF and excluding VT.
+        if name.is_empty() || value.bytes().any(|c| c == b' ' || c == b'\t') {
             return Err(RecordError::MalformedTag);
         }
         if tags.iter().any(|(seen, _)| *seen == name) {
@@ -170,6 +216,26 @@ fn parse_tags(txt: &str) -> Result<Vec<(&str, &str)>, RecordError> {
         Some(("v", VERSION)) => Ok(tags),
         _ => Err(RecordError::NotSworn),
     }
+}
+
+fn valid_rua(value: &str) -> bool {
+    let Some(address) = value.strip_prefix("mailto:") else {
+        return false;
+    };
+    if address.matches('@').count() != 1 {
+        return false;
+    }
+    let Some((local, domain)) = address.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && local.split('.').all(|atom| {
+            !atom.is_empty()
+                && atom.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~".contains(&byte)
+                })
+        })
+        && crate::payload::is_operator_domain(domain)
 }
 
 fn get<'a>(tags: &[(&'a str, &'a str)], name: &str) -> Option<&'a str> {
@@ -242,5 +308,29 @@ mod tests {
         let record = PolicyRecord::parse("v=SWORN1; t=z:y:future").unwrap();
         assert!(record.testing);
         assert!(!PolicyRecord::parse("v=SWORN1; t=z").unwrap().testing);
+    }
+
+    #[test]
+    fn rejects_policy_units_broader_than_a_prefix() {
+        assert_eq!(
+            PolicyRecord::parse("v=SWORN1; p=2001:db8:f00:1200::/56; u=48").unwrap_err(),
+            RecordError::BadValue("u")
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_report_destinations() {
+        for value in [
+            "mailto:a@b.example\r\nBcc:victim@example.net",
+            "mailto:a@b.example,c@d.example",
+            "mailto:.a@b.example",
+            "mailto:a@bad domain.example",
+        ] {
+            assert!(
+                PolicyRecord::parse(&format!("v=SWORN1; rua={value}")).is_err(),
+                "accepted {value:?}"
+            );
+        }
+        assert!(PolicyRecord::parse("v=SWORN1; rua=mailto:a.b+tag@b.example").is_ok());
     }
 }

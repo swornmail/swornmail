@@ -9,7 +9,9 @@ use std::path::PathBuf;
 
 use base64::Engine as _;
 use serde_json::Value as Json;
-use swornmail::{reason_str, verify, Ed25519PublicKey, KeyRecord, PolicyRecord};
+use swornmail::{
+    reason_str, verify_signature_only, Ed25519PublicKey, KeyRecord, PolicyRecord, Reason,
+};
 
 const SPEC: &str = "draft-kafedzhy-swornmail-01";
 
@@ -80,7 +82,7 @@ fn token_cases_match_vectors() {
             .unwrap_or_else(|e| panic!("{name}: source_ip does not parse: {e}"));
         let now = case["now_unix"].as_i64().expect("now_unix");
 
-        let outcome = verify(&token, &key, source, now);
+        let outcome = verify_signature_only(&token, &key, source, now);
         let got = reason_str(&outcome);
 
         match (case.get("expect"), case.get("expect_any")) {
@@ -169,21 +171,123 @@ fn two_phase_flow_names_the_key_record() {
         case["now_unix"].as_i64().unwrap(),
     )
     .expect("local checks pass");
+    let policy = PolicyRecord::parse(json["policy_record"].as_str().expect("policy record"))
+        .expect("policy record parses");
     assert_eq!(
         format!("_prefixes._sworn.{}", pending.operator()),
         json["policy_record_qname"]
             .as_str()
             .expect("policy_record_qname")
     );
+    let authorized = pending.authorize(&policy).expect("policy authorizes token");
     assert_eq!(
-        format!("{}._sworn.{}", pending.selector(), pending.operator()),
+        format!("{}._sworn.{}", authorized.selector(), authorized.operator()),
         json["key_record_qname"].as_str().expect("key_record_qname")
     );
 
-    let verified = pending
+    let outcome = authorized
         .verify_signature(&operator_key(&json))
         .expect("signature verifies");
+    let verified = match &outcome {
+        swornmail::Outcome::Pass(v) => v,
+        swornmail::Outcome::ObserveOnly(_) => panic!("committed policy reported as observe-only"),
+    };
     assert_eq!(verified.unit.to_string(), case["unit"].as_str().unwrap());
+    assert_eq!(outcome.auth_result(), "pass");
+}
+
+#[test]
+fn policy_authorization_blocks_key_only_impersonation() {
+    let json = vectors();
+    let case = json["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "valid_in_prefix")
+        .unwrap();
+    let token = token_bytes(case, "valid_in_prefix");
+    let source = case["source_ip"].as_str().unwrap().parse().unwrap();
+    let now = case["now_unix"].as_i64().unwrap();
+
+    let unrelated = PolicyRecord::parse("v=SWORN1; p=2001:db8:bad::/48; u=64").unwrap();
+    assert_eq!(
+        swornmail::parse(&token, source, now)
+            .unwrap()
+            .authorize(&unrelated)
+            .unwrap_err(),
+        swornmail::Reason::UnauthorizedPrefix
+    );
+
+    let wrong_unit = PolicyRecord::parse("v=SWORN1; p=2001:db8:f00::/48; u=56").unwrap();
+    assert_eq!(
+        swornmail::parse(&token, source, now)
+            .unwrap()
+            .authorize(&wrong_unit)
+            .unwrap_err(),
+        swornmail::Reason::PolicyUnitMismatch
+    );
+}
+
+#[test]
+fn testing_policy_can_never_be_reported_as_pass() {
+    let json = vectors();
+    let case = json["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "valid_in_prefix")
+        .unwrap();
+    let token = token_bytes(case, "valid_in_prefix");
+    let policy =
+        PolicyRecord::parse("v=SWORN1; p=2001:db8:f00::/48; u=64; t=y; rua=mailto:a@b.example")
+            .unwrap();
+    let outcome = swornmail::verify(
+        &token,
+        &operator_key(&json),
+        &policy,
+        case["source_ip"].as_str().unwrap().parse().unwrap(),
+        case["now_unix"].as_i64().unwrap(),
+    )
+    .unwrap();
+    // The type system, not the caller's diligence, is what keeps t=y out of
+    // sworn=pass: there is no way to reach the Verified without matching.
+    let verified = match &outcome {
+        swornmail::Outcome::ObserveOnly(v) => v,
+        swornmail::Outcome::Pass(_) => panic!("t=y policy reported as pass"),
+    };
+    assert_eq!(outcome.auth_result(), "none");
+    assert!(verified.testing);
+    assert_eq!(verified.rua.as_deref(), Some("mailto:a@b.example"));
+}
+
+/// A shared-hosting tenant enumerating its provider's aggregate gets the unit
+/// it asked for as a *claim*, but reputation still keys on the single /64 the
+/// connection actually corroborated.
+#[test]
+fn a_coarse_declared_unit_does_not_widen_the_observed_unit() {
+    let json = vectors();
+    let case = json["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "valid_in_prefix")
+        .unwrap();
+    let token = token_bytes(case, "valid_in_prefix");
+    let source = case["source_ip"].as_str().unwrap().parse().unwrap();
+    let now = case["now_unix"].as_i64().unwrap();
+    let policy = PolicyRecord::parse("v=SWORN1; p=2001:db8:f00::/48; u=64").unwrap();
+
+    let outcome = swornmail::verify(&token, &operator_key(&json), &policy, source, now).unwrap();
+    let verified = outcome.verified();
+    assert_eq!(
+        verified.observed_unit.prefix_len(),
+        swornmail::OBSERVED_UNIT_LEN,
+        "observed unit must be the source /64 regardless of the declared unit"
+    );
+    assert_eq!(
+        verified.observed_unit.to_string(),
+        case["unit"].as_str().unwrap()
+    );
 }
 
 /// The canonical vector file and the vendored snapshot must not drift apart.
@@ -214,4 +318,84 @@ fn key_record_and_public_hex_agree() {
         operator_key(&json).to_bytes(),
         "key record and ed25519_public_hex disagree"
     );
+}
+
+/// The authorization vectors: the Mode-2 contract the token vectors cannot
+/// reach, because those verify a signature against a key with no policy in
+/// sight. Expectations are authored from the draft, so this asserts conformance
+/// rather than agreement with the Go reference's current behaviour.
+#[test]
+fn authorization_cases_match_vectors() {
+    let json = vectors();
+    let key = operator_key(&json);
+    let cases = json["authorization"]
+        .as_array()
+        .expect("authorization section");
+    assert!(!cases.is_empty(), "authorization vectors are missing");
+
+    for case in cases {
+        let name = case["name"].as_str().expect("name");
+        let token = token_bytes(case, name);
+        let source = case["source_ip"]
+            .as_str()
+            .expect("source_ip")
+            .parse()
+            .unwrap_or_else(|e| panic!("{name}: source_ip does not parse: {e}"));
+        let now = case["now_unix"].as_i64().expect("now_unix");
+        let policy = PolicyRecord::parse(case["policy_record"].as_str().expect("policy_record"))
+            .unwrap_or_else(|e| panic!("{name}: policy record does not parse: {e:?}"));
+
+        let outcome = swornmail::verify(&token, &key, &policy, source, now);
+        let want_result = case["auth_result"].as_str().expect("auth_result");
+
+        let verified = match &outcome {
+            Ok(o) => {
+                assert_eq!(o.auth_result(), want_result, "{name}: auth_result");
+                // Pass vs ObserveOnly must follow the vector's testing flag,
+                // never the caller's diligence.
+                let testing = case["testing"].as_bool().unwrap_or(false);
+                match o {
+                    swornmail::Outcome::Pass(_) => {
+                        assert!(!testing, "{name}: t=y reported as pass")
+                    }
+                    swornmail::Outcome::ObserveOnly(_) => {
+                        assert!(testing, "{name}: committed policy reported as observe-only")
+                    }
+                }
+                Some(o.verified())
+            }
+            Err(reason) => {
+                let got = match reason {
+                    Reason::BadSignature
+                    | Reason::OffPrefix
+                    | Reason::Expired
+                    | Reason::NotYetValid => "fail",
+                    _ => "permerror",
+                };
+                assert_eq!(got, want_result, "{name}: auth_result for {reason:?}");
+                if let Some(expect) = case["expect"].as_str() {
+                    assert_eq!(reason_str::<()>(&Err(*reason)), expect, "{name}: reason");
+                }
+                None
+            }
+        };
+
+        if let Some(v) = verified {
+            assert_eq!(
+                v.operator,
+                case["operator"].as_str().expect("operator"),
+                "{name}: operator"
+            );
+            assert_eq!(
+                v.unit.to_string(),
+                case["unit"].as_str().expect("unit"),
+                "{name}: unit"
+            );
+            assert_eq!(
+                v.observed_unit.to_string(),
+                case["observed_unit"].as_str().expect("observed_unit"),
+                "{name}: observed unit"
+            );
+        }
+    }
 }

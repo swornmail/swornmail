@@ -8,9 +8,17 @@ use crate::address::{self, Ipv6Prefix};
 use crate::key::Ed25519PublicKey;
 use crate::payload::{Payload, Role};
 use crate::reason::Reason;
+use crate::record::PolicyRecord;
 
 /// CBOR tag for `COSE_Sign1_Tagged`. Untagged objects are rejected.
 pub const COSE_SIGN1_TAG: u64 = 18;
+
+/// The fallback reputation boundary: the connecting source's `/64`.
+///
+/// Written as its own constant rather than derived from the declared unit on
+/// purpose — a claimant-declared unit MUST NOT be able to widen it, so a
+/// future change to the unit range cannot silently move this boundary.
+pub const OBSERVED_UNIT_LEN: u8 = 64;
 /// COSE algorithm identifier for EdDSA.
 pub const ALG_EDDSA: i128 = -8;
 /// The content type that domain-separates SwornMail signatures.
@@ -73,18 +81,35 @@ impl Headers {
 
 /// The outcome of a successful verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
+// Non-exhaustive: only this crate constructs a Verified, and policy metadata
+// has grown once already. Downstream must not break when it grows again.
+#[non_exhaustive]
 pub struct Verified {
     /// The accountable operator domain.
     pub operator: String,
-    /// The reputation key: the source address masked to the payload's unit
-    /// length. Receivers key reputation on (operator, unit).
+    /// The aggregation the operator ASKED for: the source address masked to
+    /// the payload's unit length. It is a claim, not evidence — see
+    /// [`Verified::observed_unit`].
     pub unit: Ipv6Prefix,
-    /// The attested prefix the source was found in.
+    /// The reputation key: the source address masked to
+    /// [`OBSERVED_UNIT_LEN`]. Source membership proves that this connection
+    /// came from inside `prefix`; it never proves exclusive control of it, so
+    /// a claimant declaring a broad unit over shared space cannot widen where
+    /// reputation attaches. Receivers key on (operator, observed_unit) unless
+    /// they hold independent evidence of control over the whole prefix.
+    pub observed_unit: Ipv6Prefix,
+    /// The attested prefix the source was found in — the space the operator
+    /// claims. Rolling abuse up to it needs independent control evidence.
     pub prefix: Ipv6Prefix,
     /// The `kid` header, i.e. the selector whose key record was used.
     pub selector: String,
     /// The operator's declared role.
     pub role: Role,
+    /// Whether the authorizing policy is observe-only (`t=y`). A successful
+    /// cryptographic result with this flag must be reported as `sworn=none`.
+    pub testing: bool,
+    /// Aggregate report destination from the authorizing policy.
+    pub rua: Option<String>,
 }
 
 /// A token that has passed every check except the signature.
@@ -97,8 +122,19 @@ pub struct Unverified {
     payload: Payload,
     selector: String,
     unit: Ipv6Prefix,
+    observed_unit: Ipv6Prefix,
     to_be_signed: Vec<u8>,
     signature: Vec<u8>,
+}
+
+/// A locally valid token whose prefix and unit are authorized by the
+/// separately published operator policy. Receivers reach this state before
+/// fetching the key.
+#[derive(Debug, Clone)]
+pub struct Authorized {
+    token: Unverified,
+    testing: bool,
+    rua: Option<String>,
 }
 
 impl Unverified {
@@ -119,18 +155,115 @@ impl Unverified {
         &self.payload
     }
 
-    /// Verifies the signature with the key fetched for
-    /// [`selector`](Self::selector) and [`operator`](Self::operator).
-    pub fn verify_signature(self, key: &Ed25519PublicKey) -> Result<Verified, Reason> {
+    /// Applies the operator policy before any key lookup. The policy must
+    /// cover the signed prefix and its `u=` value must equal the signed unit.
+    pub fn authorize(self, policy: &PolicyRecord) -> Result<Authorized, Reason> {
+        if !policy.authorizes(self.payload.prefix) {
+            return Err(Reason::UnauthorizedPrefix);
+        }
+        if policy.unit != self.payload.unit {
+            return Err(Reason::PolicyUnitMismatch);
+        }
+        Ok(Authorized {
+            token: self,
+            testing: policy.testing,
+            rua: policy.rua.clone(),
+        })
+    }
+
+    /// Low-level signature verification without policy authorization.
+    ///
+    /// This exists for frozen token-vector conformance. It is not a complete
+    /// SwornMail verdict; production receivers must call [`Self::authorize`]
+    /// first and then [`Authorized::verify_signature`].
+    pub fn verify_signature_only(self, key: &Ed25519PublicKey) -> Result<Verified, Reason> {
+        self.finish_signature(key, false, None)
+    }
+
+    fn finish_signature(
+        self,
+        key: &Ed25519PublicKey,
+        testing: bool,
+        rua: Option<String>,
+    ) -> Result<Verified, Reason> {
         if !key.verify(&self.to_be_signed, &self.signature) {
             return Err(Reason::BadSignature);
         }
         Ok(Verified {
             operator: self.payload.operator,
             unit: self.unit,
+            observed_unit: self.observed_unit,
             prefix: self.payload.prefix,
             selector: self.selector,
             role: self.payload.role,
+            testing,
+            rua,
+        })
+    }
+}
+
+/// The verdict of a complete, policy-aware verification.
+///
+/// A testing operator is a distinct variant rather than a flag on `Verified`
+/// so that the unsafe reading is unrepresentable: a caller cannot obtain the
+/// `Verified` without deciding which arm it is in, and `Pass` is only ever
+/// produced by a policy that has accepted accountability. Reporting an
+/// observe-only deployment as `sworn=pass` is exactly what `t=y` exists to
+/// prevent, for credit and for blame alike.
+// Deliberately NOT non_exhaustive: the two verdicts are total for a complete
+// verification, and forcing a wildcard arm would let a future variant be
+// silently swept into whichever branch a consumer wrote for `_` — the exact
+// mistake exhaustive matching is here to prevent.
+#[derive(Debug, Clone)]
+pub enum Outcome {
+    /// Every check passed and the operator stakes reputation: `sworn=pass`.
+    Pass(Verified),
+    /// Every check passed but the policy carries `t=y`: report
+    /// `sworn=none policy.testing=y policy.wouldbe=pass`, and stake nothing.
+    ObserveOnly(Verified),
+}
+
+impl Outcome {
+    /// The Authentication-Results result value for this verdict.
+    pub fn auth_result(&self) -> &'static str {
+        match self {
+            Outcome::Pass(_) => "pass",
+            Outcome::ObserveOnly(_) => "none",
+        }
+    }
+
+    /// The verified token, whichever verdict was reached. Callers that reach
+    /// for this on an `ObserveOnly` outcome are responsible for not staking
+    /// reputation on it; use it for reporting only.
+    pub fn verified(&self) -> &Verified {
+        match self {
+            Outcome::Pass(v) | Outcome::ObserveOnly(v) => v,
+        }
+    }
+}
+
+impl Authorized {
+    /// Canonical lowercase operator domain whose key record is needed.
+    pub fn operator(&self) -> &str {
+        self.token.operator()
+    }
+
+    /// Canonical lowercase selector whose key record is needed.
+    pub fn selector(&self) -> &str {
+        self.token.selector()
+    }
+
+    /// Completes verification with the key fetched from
+    /// `<selector>._sworn.<operator>`. Policy metadata is exposed only after
+    /// the signature succeeds, so a failed token attributes nothing to the
+    /// operator it names.
+    pub fn verify_signature(self, key: &Ed25519PublicKey) -> Result<Outcome, Reason> {
+        let testing = self.testing;
+        let verified = self.token.finish_signature(key, testing, self.rua)?;
+        Ok(if testing {
+            Outcome::ObserveOnly(verified)
+        } else {
+            Outcome::Pass(verified)
         })
     }
 }
@@ -167,30 +300,64 @@ pub fn parse(token: &[u8], source: Ipv6Addr, now: i64) -> Result<Unverified, Rea
 
     let unit = Ipv6Prefix::new(address::mask(source, payload.unit), payload.unit)
         .expect("unit is at most 64");
+    // From the source, never from the token: a claimant-declared unit MUST
+    // NOT be able to widen the boundary reputation attaches to.
+    let observed_unit =
+        Ipv6Prefix::new(address::mask(source, OBSERVED_UNIT_LEN), OBSERVED_UNIT_LEN)
+            .expect("64 is a valid prefix length");
 
     Ok(Unverified {
         payload,
         selector,
         unit,
+        observed_unit,
         to_be_signed: cose.to_be_signed(),
         signature: cose.signature,
     })
 }
 
-/// Verifies a Mode-2 token against a source address and the current time.
+/// Low-level token/signature verification without operator policy.
 ///
 /// `key` is the operator key already fetched from
 /// `<kid>._sworn.<operator domain>`; this function performs no I/O. `now` is
-/// Unix seconds. Receivers that fetch the key per connection should call
-/// [`parse`] and [`Unverified::verify_signature`] instead, which is the same
-/// sequence with the fetch in the middle.
-pub fn verify(
+/// Unix seconds. This function exists for frozen token-vector conformance and
+/// must not be reported as a complete SwornMail pass. Production receivers
+/// use [`parse`], [`Unverified::authorize`], and
+/// [`Authorized::verify_signature`] instead.
+pub fn verify_signature_only(
     token: &[u8],
     key: &Ed25519PublicKey,
     source: Ipv6Addr,
     now: i64,
 ) -> Result<Verified, Reason> {
-    parse(token, source, now)?.verify_signature(key)
+    parse(token, source, now)?.verify_signature_only(key)
+}
+
+/// Complete no-I/O verification when both parsed DNS records are already
+/// available. Live-DNS receivers should use [`parse`],
+/// [`Unverified::authorize`], then [`Authorized::verify_signature`] to ensure
+/// the policy is checked before the key lookup.
+pub fn verify(
+    token: &[u8],
+    key: &Ed25519PublicKey,
+    policy: &PolicyRecord,
+    source: Ipv6Addr,
+    now: i64,
+) -> Result<Outcome, Reason> {
+    parse(token, source, now)?
+        .authorize(policy)?
+        .verify_signature(key)
+}
+
+/// Explicit alias for [`verify`].
+pub fn verify_authorized(
+    token: &[u8],
+    key: &Ed25519PublicKey,
+    policy: &PolicyRecord,
+    source: Ipv6Addr,
+    now: i64,
+) -> Result<Outcome, Reason> {
+    verify(token, key, policy, source, now)
 }
 
 /// Reason string for a verification outcome, using the draft's advisory
@@ -334,7 +501,9 @@ fn selector_from_kid(kid: &[u8]) -> Option<String> {
     if !kid.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'-') {
         return None;
     }
-    String::from_utf8(kid.to_vec()).ok()
+    String::from_utf8(kid.to_vec())
+        .ok()
+        .map(|selector| selector.to_ascii_lowercase())
 }
 
 #[cfg(test)]

@@ -606,6 +606,207 @@
       "txt": "u=64; v=SWORN1",
       "kind": "policy",
       "expect": "error"
+    },
+    {
+      "name": "policy_vertical_tab",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; x=a\u000bb",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_form_feed",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; x=a\fb",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_escape_byte",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; x=a\u001bb",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_no_break_space",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; x=a b",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_ideographic_space",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; x=a　b",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_trailing_no_break_space",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; u=64 ",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_space_in_value",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; x=a b",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_tab_in_value",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; x=a\tb",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_tab_between_tags",
+      "txt": "v=SWORN1;\tp=2001:db8:f00::/48",
+      "kind": "policy",
+      "expect": "ok"
+    },
+    {
+      "name": "policy_tab_around_value",
+      "txt": "v=SWORN1; p=\t2001:db8:f00::/48\t",
+      "kind": "policy",
+      "expect": "ok"
+    },
+    {
+      "name": "policy_trailing_comma",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48,",
+      "kind": "policy",
+      "expect": "ok"
+    },
+    {
+      "name": "policy_leading_comma",
+      "txt": "v=SWORN1; p=,2001:db8:f00::/48",
+      "kind": "policy",
+      "expect": "ok"
+    },
+    {
+      "name": "policy_double_comma",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48,,2001:db8:f01::/48",
+      "kind": "policy",
+      "expect": "ok"
+    }
+  ],
+  "authorization": [
+    {
+      "name": "policy_authorizes_exact_prefix",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8:f00::/48; u=64",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "pass",
+      "operator": "mailer.example.com",
+      "unit": "2001:db8:f00:1234::/64",
+      "observed_unit": "2001:db8:f00:1234::/64"
+    },
+    {
+      "name": "policy_authorizes_broader_prefix",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8::/32; u=64",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "pass",
+      "operator": "mailer.example.com",
+      "unit": "2001:db8:f00:1234::/64",
+      "observed_unit": "2001:db8:f00:1234::/64"
+    },
+    {
+      "name": "policy_narrower_than_token_prefix",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8:f00:1200::/56; u=64",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "permerror",
+      "expect": "unauthorized_prefix"
+    },
+    {
+      "name": "policy_unrelated_prefix",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8:bad::/48; u=64",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "permerror",
+      "expect": "unauthorized_prefix"
+    },
+    {
+      "name": "policy_without_prefixes_authorizes_nothing",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; u=64",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "permerror",
+      "expect": "unauthorized_prefix"
+    },
+    {
+      "name": "policy_unit_mismatch",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8:f00::/48; u=56",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "permerror",
+      "expect": "policy_unit_mismatch"
+    },
+    {
+      "name": "policy_default_unit_matches_token",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8:f00::/48",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "pass",
+      "operator": "mailer.example.com",
+      "unit": "2001:db8:f00:1234::/64",
+      "observed_unit": "2001:db8:f00:1234::/64"
+    },
+    {
+      "name": "testing_policy_is_none_not_pass",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8:f00::/48; u=64; t=y",
+      "source_ip": "2001:db8:f00:1234::a:1",
+      "now_unix": 1786293000,
+      "auth_result": "none",
+      "testing": true,
+      "operator": "mailer.example.com",
+      "unit": "2001:db8:f00:1234::/64",
+      "observed_unit": "2001:db8:f00:1234::/64"
+    },
+    {
+      "name": "coarse_declared_unit_does_not_widen_observed",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24AAAAAAAAAAAAAAAAIAMYIAQaanikAAUaaniyEAZjbXRhWEBGAwWwGA_pX-NzH-NNhLQ2M2tTJ-hlqqxuEuvG5nR9k5ZR7yhWylkDc9t-Wy-NKgscsEr58yRTLsUx1PWi_SII",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24AAAAAAAAAAAAAAAAIAMYIAQaanikAAUaaniyEAZjbXRhWEBGAwWwGA/pX+NzH+NNhLQ2M2tTJ+hlqqxuEuvG5nR9k5ZR7yhWylkDc9t+Wy+NKgscsEr58yRTLsUx1PWi/SII",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db800000000000000000000000020031820041a6a78a400051a6a78b21006636d74615840460305b0180fe95fe3731fe34d84b436336b5327e865aaac6e12ebc6e6747d939651ef2856ca590373db7e5b2f8d2a0b1cb04af9f324532ec531d4f5a2fd2208",
+      "policy_record": "v=SWORN1; p=2001:db8::/32; u=32",
+      "source_ip": "2001:db8:aaaa:bbbb::5",
+      "now_unix": 1786293000,
+      "auth_result": "pass",
+      "operator": "mailer.example.com",
+      "unit": "2001:db8::/32",
+      "observed_unit": "2001:db8:aaaa:bbbb::/64"
+    },
+    {
+      "name": "local_failure_precedes_authorization",
+      "token_b64url": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j_5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm-zelsM8dHR-zg36yzR5olqe56deWUaDAE",
+      "token_b64std": "0oRYKaMBJwN4HGFwcGxpY2F0aW9uL3N3b3JuLXRva2VuK2Nib3IERTIwMjZhoFg8pgFybWFpbGVyLmV4YW1wbGUuY29tAlEgAQ24DwAAAAAAAAAAAAAAMAMYQAQaanikAAUaaniyEAZjbXRhWEDxqXKtfedv3j/5FVQtyhuerOz6ED1MMY6KCz7AL9dvyAdvjMsaJdm+zelsM8dHR+zg36yzR5olqe56deWUaDAE",
+      "token_hex": "d2845829a3012703781c6170706c69636174696f6e2f73776f726e2d746f6b656e2b63626f7204453230323661a0583ca601726d61696c65722e6578616d706c652e636f6d025120010db80f000000000000000000000030031840041a6a78a400051a6a78b21006636d74615840f1a972ad7de76fde3ff915542dca1b9eacecfa103d4c318e8a0b3ec02fd76fc8076f8ccb1a25d9becde96c33c74747ece0dfacb3479a25a9ee7a75e594683004",
+      "policy_record": "v=SWORN1; p=2001:db8:f00::/48; u=64",
+      "source_ip": "2001:db8:bad::1",
+      "now_unix": 1786293000,
+      "auth_result": "fail",
+      "expect": "off_prefix"
     }
   ]
 }
