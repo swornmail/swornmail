@@ -9,16 +9,24 @@
 //!
 //! ```text
 //! <pubkey_hex>
-//! <name>\t<token_hex>\t<source_ip>\t<now_unix>
+//! <name>\t<token_hex>\t<source_ip>\t<now_unix>\t<policy_txt>
 //! ...
 //! ```
 //!
-//! Output: `<name>\t<reason>\t<operator>\t<unit>` per case.
+//! An empty `<policy_txt>` selects signature-only evaluation, matching the
+//! frozen token vectors. A non-empty one runs the complete path — local
+//! checks, policy authorization, then the signature — so the authorization
+//! contract is compared across implementations rather than trusted on each
+//! side separately.
+//!
+//! Output: `<name>\t<auth_result>\t<reason>\t<operator>\t<unit>\t<observed_unit>`.
 
 use std::io::{self, BufRead, Write};
 use std::net::Ipv6Addr;
 
-use swornmail::{reason_str, verify, Ed25519PublicKey};
+use swornmail::{
+    reason_str, verify, verify_signature_only, Ed25519PublicKey, Outcome, PolicyRecord, Verified,
+};
 
 fn hex_val(c: u8) -> Option<u8> {
     match c {
@@ -61,33 +69,62 @@ fn main() {
         if line.is_empty() {
             continue;
         }
-        let mut it = line.splitn(4, '\t');
+        let mut it = line.splitn(5, '\t');
         let name = it.next().unwrap_or("");
         let token_hex = it.next().unwrap_or("");
         let source_str = it.next().unwrap_or("");
         let now: i64 = it.next().unwrap_or("0").parse().unwrap_or(0);
+        let policy_txt = it.next().unwrap_or("");
 
         let token = match hex_decode(token_hex) {
             Some(t) => t,
             None => {
-                writeln!(w, "{name}\tmalformed\t\t").expect("write");
+                writeln!(w, "{name}\tpermerror\tmalformed\t\t\t").expect("write");
                 continue;
             }
         };
         let source: Ipv6Addr = match source_str.parse() {
             Ok(s) => s,
             Err(_) => {
-                writeln!(w, "{name}\tbad_source\t\t").expect("write");
+                writeln!(w, "{name}\tpermerror\tbad_source\t\t\t").expect("write");
                 continue;
             }
         };
 
-        let outcome = verify(&token, &key, source, now);
-        let reason = reason_str(&outcome);
-        let (operator, unit) = match &outcome {
-            Ok(v) => (v.operator.clone(), v.unit.to_string()),
-            Err(_) => (String::new(), String::new()),
+        // (auth_result, reason, properties). Properties are emitted for a
+        // testing outcome too: the signature verified, so the operator is
+        // attributable even though nothing is staked on it.
+        let (auth_result, reason, verified): (&str, &str, Option<Verified>) =
+            if policy_txt.is_empty() {
+                let outcome = verify_signature_only(&token, &key, source, now);
+                let reason = reason_str(&outcome);
+                match outcome {
+                    Ok(v) => ("pass", reason, Some(v)),
+                    Err(r) => (r.auth_result(), reason, None),
+                }
+            } else {
+                match PolicyRecord::parse(policy_txt) {
+                    Err(_) => ("permerror", "policy_record_invalid", None),
+                    Ok(policy) => match verify(&token, &key, &policy, source, now) {
+                        Ok(Outcome::Pass(v)) => ("pass", "pass", Some(v)),
+                        Ok(Outcome::ObserveOnly(v)) => ("none", "testing_mode", Some(v)),
+                        Err(r) => (r.auth_result(), reason_str::<()>(&Err(r)), None),
+                    },
+                }
+            };
+
+        let (operator, unit, observed) = match &verified {
+            Some(v) => (
+                v.operator.clone(),
+                v.unit.to_string(),
+                v.observed_unit.to_string(),
+            ),
+            None => (String::new(), String::new(), String::new()),
         };
-        writeln!(w, "{name}\t{reason}\t{operator}\t{unit}").expect("write");
+        writeln!(
+            w,
+            "{name}\t{auth_result}\t{reason}\t{operator}\t{unit}\t{observed}"
+        )
+        .expect("write");
     }
 }

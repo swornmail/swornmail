@@ -20,17 +20,26 @@
 //! ## Verifying a token
 //!
 //! ```no_run
-//! use swornmail::{parse, reason_str, KeyRecord};
+//! use swornmail::{parse, reason_str, KeyRecord, Outcome, PolicyRecord};
 //!
 //! # fn lookup_txt(_qname: &str) -> String { String::new() }
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # let token: Vec<u8> = Vec::new();
 //! // Local checks first: a token that fails here costs no DNS query.
 //! let pending = parse(&token, "2001:db8:f00::1".parse()?, 1786293000)?;
-//! let qname = format!("{}._sworn.{}", pending.selector(), pending.operator());
-//! let record = KeyRecord::parse(&lookup_txt(&qname))?;
-//! let outcome = pending.verify_signature(&record.public_key);
-//! println!("sworn={}", reason_str(&outcome));
+//! let policy_qname = format!("_prefixes._sworn.{}", pending.operator());
+//! let policy = PolicyRecord::parse(&lookup_txt(&policy_qname))?;
+//! let authorized = pending.authorize(&policy)?; // before the key query
+//! let key_qname = format!("{}._sworn.{}", authorized.selector(), authorized.operator());
+//! let record = KeyRecord::parse(&lookup_txt(&key_qname))?;
+//! match authorized.verify_signature(&record.public_key) {
+//!     // Key reputation on `observed_unit`, not `unit`: `unit` is what the
+//!     // operator asked for, `observed_unit` is what this connection proved.
+//!     Ok(Outcome::Pass(v)) => println!("sworn=pass unit={}", v.observed_unit),
+//!     // t=y: report the would-be result and stake nothing.
+//!     Ok(Outcome::ObserveOnly(_)) => println!("sworn=none policy.testing=y policy.wouldbe=pass"),
+//!     Err(reason) => println!("sworn-reason={}", reason_str::<()>(&Err(reason))),
+//! }
 //! # Ok(())
 //! # }
 //! ```
@@ -54,7 +63,10 @@ pub use key::Ed25519PublicKey;
 pub use payload::{Payload, Role};
 pub use reason::Reason;
 pub use record::{KeyRecord, PolicyRecord, RecordError};
-pub use token::{parse, reason_str, verify, Unverified, Verified};
+pub use token::{
+    parse, reason_str, verify, verify_authorized, verify_signature_only, Authorized, Outcome,
+    Unverified, Verified, OBSERVED_UNIT_LEN,
+};
 
 /// Protocol version tag used in DNS records and tokens.
 pub const SWORN_VERSION: &str = "SWORN1";

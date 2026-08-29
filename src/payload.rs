@@ -163,7 +163,7 @@ impl Payload {
         }
 
         Ok(Payload {
-            operator: operator.to_owned(),
+            operator: operator.to_ascii_lowercase(),
             prefix,
             unit,
             iat,
@@ -209,7 +209,7 @@ fn decode_prefix(b: &[u8]) -> Result<Ipv6Prefix, Reason> {
 /// This runs before any DNS query is built from the value, which is what keeps
 /// a token from steering a verifier at an attacker-chosen name — or, with the
 /// CRLF that the vectors exercise, at an injected SMTP command.
-fn is_operator_domain(s: &str) -> bool {
+pub(crate) fn is_operator_domain(s: &str) -> bool {
     if s.is_empty() || s.len() > 253 || !s.is_ascii() {
         return false;
     }

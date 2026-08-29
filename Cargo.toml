@@ -1,6 +1,6 @@
 [package]
 name = "swornmail"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.81"
 description = "Verifier for the SwornMail protocol (cryptographic IPv6 prefix attestation for email senders): Mode-2 COSE_Sign1 connection tokens and operator DNS records. Early development — protocol draft in progress."
