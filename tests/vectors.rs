@@ -68,10 +68,10 @@ fn token_cases_match_vectors() {
     let json = vectors();
     let key = operator_key(&json);
     let cases = json["cases"].as_array().expect("cases array");
-    // The v1 set has 51 cases (48 frozen plus 3 appended for the COSE alg
-    // identifier); a shorter file means a truncated or filtered copy, which
-    // would pass vacuously.
-    assert!(cases.len() >= 51, "only {} token cases found", cases.len());
+    // The v1 set has 54 cases: 48 frozen, 3 appended for the COSE alg
+    // identifier, 3 for strict Ed25519. A shorter file means a truncated or
+    // filtered copy, which would pass vacuously.
+    assert!(cases.len() >= 54, "only {} token cases found", cases.len());
 
     for case in cases {
         let name = case["name"].as_str().expect("case name");
@@ -83,7 +83,15 @@ fn token_cases_match_vectors() {
             .unwrap_or_else(|e| panic!("{name}: source_ip does not parse: {e}"));
         let now = case["now_unix"].as_i64().expect("now_unix");
 
-        let outcome = verify_signature_only(&token, &key, source, now);
+        // A case may carry its own operator key (the small-order key case
+        // does); every other case uses the file's key.
+        let case_key = case.get("public_key_hex").map(|hex_key| {
+            let raw = hex::decode(hex_key.as_str().expect("public_key_hex is a string"))
+                .unwrap_or_else(|e| panic!("{name}: public_key_hex is not hex: {e}"));
+            Ed25519PublicKey::from_bytes(&raw)
+                .unwrap_or_else(|| panic!("{name}: public_key_hex is not a point"))
+        });
+        let outcome = verify_signature_only(&token, case_key.as_ref().unwrap_or(&key), source, now);
         let got = reason_str(&outcome);
 
         match (case.get("expect"), case.get("expect_any")) {

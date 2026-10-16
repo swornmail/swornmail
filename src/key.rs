@@ -30,10 +30,10 @@ impl Ed25519PublicKey {
 
     /// Verifies a detached signature over `message`.
     ///
-    /// Uses strict verification, which rejects small-order and non-canonically
-    /// encoded keys and signatures. The draft does not specify a verification
-    /// equation; strict is the safer reading, and the difference is only
-    /// reachable with a deliberately malformed key.
+    /// Uses strict verification, which rejects a small-order key or R and a
+    /// non-canonical S. The draft being submitted requires this: a
+    /// small-order public key or R is a signature failure, because under such a
+    /// key one fixed signature verifies for every message.
     pub(crate) fn verify(&self, message: &[u8], signature: &[u8]) -> bool {
         let Ok(signature) = <[u8; 64]>::try_from(signature) else {
             return false;
