@@ -22,6 +22,13 @@ deployment as `sworn=pass` without noticing. Key reputation on
 `Verified::observed_unit` (the source `/64` this connection corroborated), not
 on `Verified::unit` (the aggregation the operator asked for).
 
+A receiver that reaches IPv4 clients through NAT64 or SIIT must pass its
+translation prefix to `parse_excluding` (instead of `parse`): every
+translated client appears inside it, so a token covering it would
+otherwise pass for all of them. The one-shot `verify`, `verify_authorized`
+and `verify_signature_only` helpers take no such list, so such a receiver
+must use the staged flow, starting with `parse_excluding`.
+
 `0.2` is a breaking API change from `0.1`: `verify` takes a policy record,
 returns `Outcome`, and `Verified` carries the observed unit.
 
