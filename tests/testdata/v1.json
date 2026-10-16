@@ -814,6 +814,12 @@
       "txt": "v=SWORN1; p=2001:db8:f00:0:0:0:0:0/48",
       "kind": "policy",
       "expect": "ok"
+    },
+    {
+      "name": "key_pk_noncanonical_base64",
+      "txt": "v=SWORN1; k=ed25519; pk=ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmR=",
+      "kind": "key",
+      "expect": "error"
     }
   ],
   "authorization": [
