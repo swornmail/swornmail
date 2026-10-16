@@ -5,7 +5,8 @@
 //! took the last of two duplicate keys would let a signer smuggle a second
 //! attested prefix past a verifier that read the first.
 
-use ciborium::value::Value;
+use ciborium::{tag::Captured, value::Value};
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 
 use crate::address::Ipv6Prefix;
@@ -90,6 +91,11 @@ impl Payload {
     /// unsorted map keys, indefinite-length maps, or non-minimal integer
     /// encodings; the signature still binds the exact octets. A verifier that
     /// enforced determinism would refuse tokens this one accepts.
+    ///
+    /// `Value` has already folded a bignum into a plain integer, so this
+    /// cannot reject a bignum `unit`, `iat` or `exp`, which the CDDL's `uint`
+    /// excludes. [`crate::parse`] checks the encoded payload for that; callers
+    /// that decode a payload themselves must too.
     pub fn from_value(value: &Value) -> Result<Payload, Reason> {
         let entries = match value {
             Value::Map(entries) => entries,
@@ -171,6 +177,35 @@ impl Payload {
             role,
         })
     }
+}
+
+/// Rejects a payload whose defined keys carry a CBOR tag.
+///
+/// The CDDL types those values `tstr`, `bstr` and `uint`. A tagged value is
+/// none of these, and a bignum (tag 2) is CDDL's `biguint`, a different type.
+/// ciborium's `Value` folds a bignum into a plain integer, so [`Payload::from_value`]
+/// cannot see one; decoding through `Captured` keeps the tag. Only keys the
+/// draft leaves as `any` may be tagged. `bytes` is untrusted input, and this
+/// fails closed: a payload that is not an integer-keyed map is malformed here
+/// as it is in `from_value`.
+pub(crate) fn reject_tagged_fields(bytes: &[u8]) -> Result<(), Reason> {
+    let map: BTreeMap<i128, Captured<Value>> =
+        ciborium::de::from_reader(bytes).map_err(|_| Reason::Malformed)?;
+    let defined = [
+        KEY_OPERATOR,
+        KEY_PREFIX,
+        KEY_UNIT,
+        KEY_IAT,
+        KEY_EXP,
+        KEY_ROLE,
+    ];
+    if map
+        .iter()
+        .any(|(key, Captured(tag, _))| tag.is_some() && defined.contains(key))
+    {
+        return Err(Reason::Malformed);
+    }
+    Ok(())
 }
 
 fn text(value: &Value) -> Result<&str, Reason> {
