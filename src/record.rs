@@ -119,7 +119,8 @@ impl PolicyRecord {
 
         let unit = match get(&tags, "u") {
             Some(value) => {
-                let unit: u8 = value.parse().map_err(|_| RecordError::BadValue("u"))?;
+                let unit =
+                    crate::address::parse_decimal(value).ok_or(RecordError::BadValue("u"))?;
                 if !(1..=crate::address::MAX_PREFIX_LEN).contains(&unit) {
                     return Err(RecordError::BadValue("u"));
                 }

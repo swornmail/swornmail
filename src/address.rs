@@ -131,8 +131,25 @@ impl FromStr for Ipv6Prefix {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (addr, len) = s.split_once('/').ok_or(ParsePrefixError)?;
         let addr: Ipv6Addr = addr.parse().map_err(|_| ParsePrefixError)?;
-        let len: u8 = len.parse().map_err(|_| ParsePrefixError)?;
+        let len = parse_decimal(len).ok_or(ParsePrefixError)?;
         Ipv6Prefix::new(addr, len).ok_or(ParsePrefixError)
+    }
+}
+
+/// Parses a record number the way the ABNF writes it: one to three digits,
+/// with no sign and no leading zero. `u8::from_str` also accepts "+48" and
+/// "048", which the Go and Lua parsers reject, so the same record would pass
+/// here and fail there.
+pub(crate) fn parse_decimal(s: &str) -> Option<u8> {
+    let bytes = s.as_bytes();
+    let well_formed = !bytes.is_empty()
+        && bytes.len() <= 3
+        && bytes.iter().all(u8::is_ascii_digit)
+        && (bytes.len() == 1 || bytes[0] != b'0');
+    if well_formed {
+        s.parse().ok()
+    } else {
+        None
     }
 }
 
