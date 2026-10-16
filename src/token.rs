@@ -279,13 +279,26 @@ impl Authorized {
 /// so garbage tokens cannot turn a verifier into an attacker-directed query
 /// generator. `now` is Unix seconds.
 pub fn parse(token: &[u8], source: Ipv6Addr, now: i64) -> Result<Unverified, Reason> {
+    parse_excluding(token, source, now, &[])
+}
+
+/// [`parse`] with the receiver's own extra ineligible source prefixes, such
+/// as its NAT64 or SIIT translation prefixes. Every translated client shows
+/// up inside such a prefix, so a token covering it would vouch for all of
+/// them; a source inside one is rejected as ineligible.
+pub fn parse_excluding(
+    token: &[u8],
+    source: Ipv6Addr,
+    now: i64,
+    ineligible: &[Ipv6Prefix],
+) -> Result<Unverified, Reason> {
     let cose = CoseSign1::parse(token)?;
     let selector = cose.check_headers()?;
 
     let payload_value: Value = decode_cbor(&cose.payload)?;
     let payload = Payload::from_value(&payload_value)?;
 
-    if !address::is_eligible_source(source) {
+    if !address::is_eligible_source(source) || ineligible.iter().any(|p| p.contains(source)) {
         return Err(Reason::IneligibleSource);
     }
 
@@ -325,8 +338,8 @@ pub fn parse(token: &[u8], source: Ipv6Addr, now: i64) -> Result<Unverified, Rea
 /// `<kid>._sworn.<operator domain>`; this function performs no I/O. `now` is
 /// Unix seconds. This function exists for frozen token-vector conformance and
 /// must not be reported as a complete SwornMail pass. Production receivers
-/// use [`parse`], [`Unverified::authorize`], and
-/// [`Authorized::verify_signature`] instead.
+/// use [`parse`] (or [`parse_excluding`] behind NAT64 or SIIT),
+/// [`Unverified::authorize`], and [`Authorized::verify_signature`] instead.
 pub fn verify_signature_only(
     token: &[u8],
     key: &Ed25519PublicKey,
@@ -340,6 +353,10 @@ pub fn verify_signature_only(
 /// available. Live-DNS receivers should use [`parse`],
 /// [`Unverified::authorize`], then [`Authorized::verify_signature`] to ensure
 /// the policy is checked before the key lookup.
+///
+/// This applies the protocol's ineligible ranges only. A receiver behind
+/// NAT64 or SIIT must instead start the staged flow with [`parse_excluding`]
+/// and its translation prefix, or every translated client can pass.
 pub fn verify(
     token: &[u8],
     key: &Ed25519PublicKey,

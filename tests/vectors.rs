@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use base64::Engine as _;
 use serde_json::Value as Json;
 use swornmail::{
-    reason_str, verify_signature_only, Ed25519PublicKey, KeyRecord, PolicyRecord, Reason,
+    parse, parse_excluding, reason_str, verify_signature_only, Ed25519PublicKey, Ipv6Prefix,
+    KeyRecord, PolicyRecord, Reason,
 };
 
 const SPEC: &str = "draft-kafedzhy-swornmail-01";
@@ -407,4 +408,30 @@ fn authorization_cases_match_vectors() {
             );
         }
     }
+}
+
+/// A receiver's own translation prefix makes its sources ineligible: the
+/// valid vector token is rejected from inside the configured /64 and still
+/// parses from another /64 of the attested prefix.
+#[test]
+fn configured_ineligible_prefix_rejects_source() {
+    let json = vectors();
+    let case = json["cases"]
+        .as_array()
+        .expect("cases array")
+        .iter()
+        .find(|c| c["name"] == "valid_in_prefix")
+        .expect("valid_in_prefix case");
+    let token = token_bytes(case, "valid_in_prefix");
+    let now = case["now_unix"].as_i64().expect("now_unix");
+    let inside = "2001:db8:f00:1234::a:1".parse().unwrap();
+    let elsewhere = "2001:db8:f00:abcd::1".parse().unwrap();
+    let configured: [Ipv6Prefix; 1] = ["2001:db8:f00:1234::/64".parse().unwrap()];
+
+    assert!(matches!(
+        parse_excluding(&token, inside, now, &configured),
+        Err(Reason::IneligibleSource)
+    ));
+    assert!(parse_excluding(&token, elsewhere, now, &configured).is_ok());
+    assert!(parse(&token, inside, now).is_ok());
 }
