@@ -748,6 +748,24 @@
       "txt": "v=SWORN1; p=2001:db8:f00::/48,,2001:db8:f01::/48",
       "kind": "policy",
       "expect": "ok"
+    },
+    {
+      "name": "key_not_a_curve_point",
+      "txt": "v=SWORN1; k=ed25519; pk=AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "kind": "key",
+      "expect": "error"
+    },
+    {
+      "name": "key_noncanonical_y_accepted",
+      "txt": "v=SWORN1; k=ed25519; pk=8P///////////////////////////////////////38=",
+      "kind": "key",
+      "expect": "ok"
+    },
+    {
+      "name": "key_x0_sign_bit_accepted",
+      "txt": "v=SWORN1; k=ed25519; pk=AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA=",
+      "kind": "key",
+      "expect": "ok"
     }
   ],
   "authorization": [
