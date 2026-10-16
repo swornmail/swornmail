@@ -19,8 +19,11 @@ pub const COSE_SIGN1_TAG: u64 = 18;
 /// purpose — a claimant-declared unit MUST NOT be able to widen it, so a
 /// future change to the unit range cannot silently move this boundary.
 pub const OBSERVED_UNIT_LEN: u8 = 64;
-/// COSE algorithm identifier for EdDSA.
+/// COSE algorithm identifier for polymorphic EdDSA. RFC 9864 deprecated it,
+/// but it is what signers emit until released verifiers accept `ALG_ED25519`.
 pub const ALG_EDDSA: i128 = -8;
+/// Fully-specified COSE algorithm identifier for Ed25519 (RFC 9864 §2.2).
+pub const ALG_ED25519: i128 = -19;
 /// The content type that domain-separates SwornMail signatures.
 pub const CONTENT_TYPE: &str = "application/sworn-token+cbor";
 /// Fixed clock-skew tolerance, in seconds, applied at both window edges.
@@ -441,9 +444,10 @@ impl CoseSign1 {
         }
 
         // The algorithm comes from the key record, never from the token; the
-        // header must merely agree with it. Only Ed25519 is implemented.
+        // header must merely agree with it. Only Ed25519 is implemented, and
+        // either COSE identifier names it.
         match self.protected.get(LABEL_ALG) {
-            Some(Value::Integer(alg)) if i128::from(*alg) == ALG_EDDSA => {}
+            Some(Value::Integer(alg)) if [ALG_EDDSA, ALG_ED25519].contains(&i128::from(*alg)) => {}
             _ => return Err(Reason::HeaderConfusion),
         }
 
