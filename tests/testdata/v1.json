@@ -766,6 +766,54 @@
       "txt": "v=SWORN1; k=ed25519; pk=AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA=",
       "kind": "key",
       "expect": "ok"
+    },
+    {
+      "name": "policy_unit_plus_sign",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; u=+64",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_unit_leading_zero",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; u=064",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_prefix_len_leading_zero",
+      "txt": "v=SWORN1; p=2001:db8:f00::/048",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_prefix_len_plus_sign",
+      "txt": "v=SWORN1; p=2001:db8:f00::/+48",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_empty_tag_name",
+      "txt": "v=SWORN1; p=2001:db8:f00::/48; =x",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_dotted_quad_before_gap",
+      "txt": "v=SWORN1; p=32.1.13.184::/32",
+      "kind": "policy",
+      "expect": "error"
+    },
+    {
+      "name": "policy_uppercase_hex_prefix",
+      "txt": "v=SWORN1; p=2001:DB8:F00::/48",
+      "kind": "policy",
+      "expect": "ok"
+    },
+    {
+      "name": "policy_uncompressed_prefix",
+      "txt": "v=SWORN1; p=2001:db8:f00:0:0:0:0:0/48",
+      "kind": "policy",
+      "expect": "ok"
     }
   ],
   "authorization": [
