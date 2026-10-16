@@ -42,6 +42,11 @@ conforming verifiers to read one record differently — the last of those was
 a measured three-way disagreement between this crate, the Go reference and
 the rspamd module over what counts as whitespace.
 
+A token longer than `MAX_TOKEN_LEN` (3072 octets) is malformed and is
+rejected before any CBOR decoding. The longest SWORN command line carries at
+most 3066 octets of token, so nothing a client can send over SMTP is
+affected; the bound protects callers that take tokens from elsewhere.
+
 This is an **independent** implementation, written from the draft rather
 than ported from the Go reference implementation
 ([swornmail-go](https://github.com/swornmail/swornmail-go)). Both verify

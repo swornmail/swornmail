@@ -69,10 +69,10 @@ fn token_cases_match_vectors() {
     let json = vectors();
     let key = operator_key(&json);
     let cases = json["cases"].as_array().expect("cases array");
-    // The v1 set has 54 cases: 48 frozen, 3 appended for the COSE alg
-    // identifier, 3 for strict Ed25519. A shorter file means a truncated or
-    // filtered copy, which would pass vacuously.
-    assert!(cases.len() >= 54, "only {} token cases found", cases.len());
+    // The v1 set has 56 cases: 48 frozen, 3 appended for the COSE alg
+    // identifier, 3 for strict Ed25519, 2 for the size bound. A shorter file
+    // means a truncated or filtered copy, which would pass vacuously.
+    assert!(cases.len() >= 56, "only {} token cases found", cases.len());
 
     for case in cases {
         let name = case["name"].as_str().expect("case name");

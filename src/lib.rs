@@ -65,7 +65,7 @@ pub use reason::Reason;
 pub use record::{KeyRecord, PolicyRecord, RecordError};
 pub use token::{
     parse, parse_excluding, reason_str, verify, verify_authorized, verify_signature_only,
-    Authorized, Outcome, Unverified, Verified, OBSERVED_UNIT_LEN,
+    Authorized, Outcome, Unverified, Verified, MAX_TOKEN_LEN, OBSERVED_UNIT_LEN,
 };
 
 /// Protocol version tag used in DNS records and tokens.

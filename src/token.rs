@@ -13,6 +13,11 @@ use crate::record::PolicyRecord;
 /// CBOR tag for `COSE_Sign1_Tagged`. Untagged objects are rejected.
 pub const COSE_SIGN1_TAG: u64 = 18;
 
+/// The longest token, in octets, a verifier decodes. The longest SWORN
+/// command line (4096 octets) carries at most 3066; the bound is checked
+/// before any CBOR work, so an oversized input costs nothing to refuse.
+pub const MAX_TOKEN_LEN: usize = 3072;
+
 /// The fallback reputation boundary: the connecting source's `/64`.
 ///
 /// Written as its own constant rather than derived from the declared unit on
@@ -292,6 +297,10 @@ pub fn parse_excluding(
     now: i64,
     ineligible: &[Ipv6Prefix],
 ) -> Result<Unverified, Reason> {
+    // The token is untrusted input; bound it before any CBOR decoding.
+    if token.len() > MAX_TOKEN_LEN {
+        return Err(Reason::Malformed);
+    }
     let cose = CoseSign1::parse(token)?;
     let selector = cose.check_headers()?;
 
