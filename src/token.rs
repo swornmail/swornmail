@@ -305,6 +305,7 @@ pub fn parse_excluding(
     let selector = cose.check_headers()?;
 
     let payload_value: Value = decode_cbor(&cose.payload)?;
+    crate::payload::reject_tagged_fields(&cose.payload)?;
     let payload = Payload::from_value(&payload_value)?;
 
     if !address::is_eligible_source(source) || ineligible.iter().any(|p| p.contains(source)) {
