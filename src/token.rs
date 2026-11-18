@@ -5,6 +5,7 @@ use std::io::Cursor;
 use std::net::Ipv6Addr;
 
 use crate::address::{self, Ipv6Prefix};
+use crate::encoded;
 use crate::key::Ed25519PublicKey;
 use crate::payload::{Payload, Role};
 use crate::reason::Reason;
@@ -305,7 +306,7 @@ pub fn parse_excluding(
     let selector = cose.check_headers()?;
 
     let payload_value: Value = decode_cbor(&cose.payload)?;
-    crate::payload::reject_tagged_fields(&cose.payload)?;
+    crate::payload::check_encoded_types(&cose.payload)?;
     let payload = Payload::from_value(&payload_value)?;
 
     if !address::is_eligible_source(source) || ineligible.iter().any(|p| p.contains(source)) {
@@ -399,6 +400,30 @@ pub fn reason_str<T>(outcome: &Result<T, Reason>) -> &'static str {
     }
 }
 
+/// Holds an encoded header bucket to the CBOR types COSE names: every label
+/// an `int` or a `tstr` (RFC 9052 Section 3), and `alg` an `int`.
+///
+/// `Headers::from_value` cannot do this, because `Value` has already folded a
+/// bignum into a plain integer. A token whose kid sat under the label
+/// `2(h'04')`, or whose alg was the bignum `3(h'07')`, was accepted here and
+/// is malformed to a verifier that keeps the tag. `bucket` is untrusted
+/// input; a bucket that is not a map is malformed.
+fn check_encoded_labels(bucket: &[u8]) -> Result<(), Reason> {
+    for (label, value) in encoded::map_entries(bucket)? {
+        let is_text = encoded::major(label)? == encoded::MAJOR_TEXT;
+        let label = encoded::integer(label);
+        if label.is_none() && !is_text {
+            return Err(Reason::Malformed);
+        }
+        if label == Some(LABEL_ALG)
+            && ![encoded::MAJOR_UINT, encoded::MAJOR_NINT].contains(&encoded::major(value)?)
+        {
+            return Err(Reason::HeaderConfusion);
+        }
+    }
+    Ok(())
+}
+
 /// A parsed `COSE_Sign1`, keeping the protected bucket's original octets
 /// because the signature is computed over them, not over a re-encoding.
 struct CoseSign1 {
@@ -430,11 +455,13 @@ impl CoseSign1 {
         let unprotected = Headers::from_value(&items.next().ok_or(Reason::Malformed)?)?;
         let payload = take_bytes(items.next())?;
         let signature = take_bytes(items.next())?;
+        check_encoded_labels(encoded::unprotected_bucket(token)?)?;
 
         // A zero-length protected bucket encodes an empty map, per COSE.
         let protected = if protected_raw.is_empty() {
             Headers(Vec::new())
         } else {
+            check_encoded_labels(&protected_raw)?;
             Headers::from_value(&decode_cbor(&protected_raw)?)?
         };
 
@@ -557,5 +584,58 @@ mod tests {
         assert!(selector_from_kid(b"two.labels").is_none());
         assert!(selector_from_kid(b"under_score").is_none());
         assert!(selector_from_kid("sel\u{e9}".as_bytes()).is_none());
+    }
+
+    #[test]
+    fn accepts_integer_and_text_labels() {
+        for bucket in [
+            &[0xa0][..],
+            &[0xa1, 0x01, 0x27],                         // {1: -8}
+            &[0xa1, 0x61, b'x', 0x01],                   // {"x": 1}
+            &[0xa1, 0x3a, 0x00, 0x01, 0x11, 0x6f, 0x01], // {-70000: 1}
+            &[0xa1, 0x18, 0x63, 0xc2, 0x41, 0x01],       // {99: 2(h'01')}
+        ] {
+            assert_eq!(check_encoded_labels(bucket), Ok(()), "{bucket:02x?}");
+        }
+    }
+
+    // `Value` folds a bignum into an integer, so a kid under the label
+    // 2(h'04') was read as the kid: a signed token this verifier accepted and
+    // one that keeps the tag rejects. A label is int / tstr.
+    #[test]
+    fn rejects_labels_that_are_not_int_or_tstr() {
+        for bucket in [
+            &[0xa1, 0xc2, 0x41, 0x04, 0x40][..],   // {2(h'04'): h''}
+            &[0xa1, 0xc3, 0x41, 0x00, 0x01],       // {3(h'00'): 1}
+            &[0xa1, 0xd9, 0xd9, 0xf7, 0x04, 0x40], // {55799(4): h''}
+            &[0xa1, 0x41, 0x01, 0x01],             // {h'01': 1}
+            &[0xa1, 0xf6, 0x01],                   // {null: 1}
+            &[0xd9, 0xd9, 0xf7, 0xa0],             // 55799({})
+            &[0x80],                               // []
+        ] {
+            assert_eq!(
+                check_encoded_labels(bucket),
+                Err(Reason::Malformed),
+                "{bucket:02x?}"
+            );
+        }
+    }
+
+    // 3(h'07') is the bignum spelling of -8. It is not an int, so it is not
+    // Ed25519's identifier.
+    #[test]
+    fn rejects_an_alg_that_is_not_an_integer() {
+        for bucket in [
+            &[0xa1, 0x01, 0xc3, 0x41, 0x07][..],   // {1: 3(h'07')}
+            &[0xa1, 0x01, 0xd9, 0xd9, 0xf7, 0x27], // {1: 55799(-8)}
+            &[0xa1, 0x01, 0x65, b'E', b'd', b'D', b'S', b'A'],
+            &[0xa1, 0x01, 0xf6], // {1: null}
+        ] {
+            assert_eq!(
+                check_encoded_labels(bucket),
+                Err(Reason::HeaderConfusion),
+                "{bucket:02x?}"
+            );
+        }
     }
 }

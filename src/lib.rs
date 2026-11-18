@@ -52,6 +52,7 @@
 #![deny(missing_docs)]
 
 pub mod address;
+mod encoded;
 pub mod key;
 pub mod payload;
 pub mod reason;

@@ -5,11 +5,11 @@
 //! took the last of two duplicate keys would let a signer smuggle a second
 //! attested prefix past a verifier that read the first.
 
-use ciborium::{tag::Captured, value::Value};
-use std::collections::BTreeMap;
+use ciborium::value::Value;
 use std::net::Ipv6Addr;
 
 use crate::address::Ipv6Prefix;
+use crate::encoded;
 use crate::reason::Reason;
 
 /// Maximum token lifetime, `exp - iat`, in seconds.
@@ -93,9 +93,9 @@ impl Payload {
     /// enforced determinism would refuse tokens this one accepts.
     ///
     /// `Value` has already folded a bignum into a plain integer, so this
-    /// cannot reject a bignum `unit`, `iat` or `exp`, which the CDDL's `uint`
-    /// excludes. [`crate::parse`] checks the encoded payload for that; callers
-    /// that decode a payload themselves must too.
+    /// cannot reject a bignum key, `unit`, `iat` or `exp`, none of which the
+    /// CDDL's `int` and `uint` admit. [`crate::parse`] checks the encoded
+    /// payload for that; callers that decode a payload themselves must too.
     pub fn from_value(value: &Value) -> Result<Payload, Reason> {
         let entries = match value {
             Value::Map(entries) => entries,
@@ -179,31 +179,30 @@ impl Payload {
     }
 }
 
-/// Rejects a payload whose defined keys carry a CBOR tag.
+/// Holds the encoded payload to the CBOR types its CDDL names: every key an
+/// `int`, and each defined key's value a `tstr`, `bstr` or `uint`.
 ///
-/// The CDDL types those values `tstr`, `bstr` and `uint`. A tagged value is
-/// none of these, and a bignum (tag 2) is CDDL's `biguint`, a different type.
-/// ciborium's `Value` folds a bignum into a plain integer, so [`Payload::from_value`]
-/// cannot see one; decoding through `Captured` keeps the tag. Only keys the
-/// draft leaves as `any` may be tagged. `bytes` is untrusted input, and this
-/// fails closed: a payload that is not an integer-keyed map is malformed here
-/// as it is in `from_value`.
-pub(crate) fn reject_tagged_fields(bytes: &[u8]) -> Result<(), Reason> {
-    let map: BTreeMap<i128, Captured<Value>> =
-        ciborium::de::from_reader(bytes).map_err(|_| Reason::Malformed)?;
-    let defined = [
-        KEY_OPERATOR,
-        KEY_PREFIX,
-        KEY_UNIT,
-        KEY_IAT,
-        KEY_EXP,
-        KEY_ROLE,
-    ];
-    if map
-        .iter()
-        .any(|(key, Captured(tag, _))| tag.is_some() && defined.contains(key))
-    {
-        return Err(Reason::Malformed);
+/// ciborium's `Value` folds a bignum (tag 2 or 3) into a plain integer, so
+/// [`Payload::from_value`] cannot see one. As a value that let a bignum
+/// `unit`, `iat` or `exp` through, which is CDDL's `biguint`, a different
+/// type. As a key it is worse: `{2(h'01'): "evil.example", ...}` with no
+/// integer key 1 named its operator from the bignum, while a verifier that
+/// keeps the tag rejects the same signed payload. The major type of each key
+/// and defined value is therefore read off the encoding. Only values of keys
+/// the draft leaves as `any` may be tagged. `bytes` is untrusted input, and
+/// this fails closed: a payload that is not an integer-keyed map is malformed
+/// here as it is in `from_value`.
+pub(crate) fn check_encoded_types(bytes: &[u8]) -> Result<(), Reason> {
+    for (key, value) in encoded::map_entries(bytes)? {
+        let expected = match encoded::integer(key).ok_or(Reason::Malformed)? {
+            KEY_OPERATOR | KEY_ROLE => encoded::MAJOR_TEXT,
+            KEY_PREFIX => encoded::MAJOR_BYTES,
+            KEY_UNIT | KEY_IAT | KEY_EXP => encoded::MAJOR_UINT,
+            _ => continue,
+        };
+        if encoded::major(value)? != expected {
+            return Err(Reason::Malformed);
+        }
     }
     Ok(())
 }
@@ -262,6 +261,69 @@ pub(crate) fn is_operator_domain(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_typed_fields_and_any_under_unknown_keys() {
+        for payload in [
+            &[0xa0][..],
+            &[0xa1, 0x01, 0x61, b'a'],             // {1: "a"}
+            &[0xa1, 0x02, 0x41, 0x00],             // {2: h'00'}
+            &[0xa1, 0x03, 0x18, 0x40],             // {3: 64}
+            &[0xa1, 0x18, 0x63, 0xc2, 0x41, 0x01], // {99: 2(h'01')}
+            &[0xa1, 0x18, 0x63, 0xf6],             // {99: null}
+            &[0xa1, 0x38, 0x0f, 0x01],             // {-16: 1}
+            // {2^64-1: 1}: every CBOR integer is an `int`, however wide.
+            &[
+                0xa1, 0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+            ],
+        ] {
+            assert_eq!(check_encoded_types(payload), Ok(()), "{payload:02x?}");
+        }
+    }
+
+    // `{2(h'01'): "evil.example", ...}` with no integer key 1 named its
+    // operator from the bignum, because `Value` folds one into an integer. A
+    // verifier that keeps the tag rejects the same signed payload.
+    #[test]
+    fn rejects_keys_that_are_not_integers() {
+        for payload in [
+            &[0xa1, 0xc2, 0x41, 0x01, 0x61, b'a'][..], // {2(h'01'): "a"}
+            &[0xa1, 0xc2, 0x41, 0x63, 0x01],           // {2(h'63'): 1}
+            &[0xa1, 0xc3, 0x41, 0x63, 0x01],           // {3(h'63'): 1}
+            &[0xa1, 0xd9, 0xd9, 0xf7, 0x01, 0x61, b'a'], // {55799(1): "a"}
+            &[0xa1, 0x61, b'1', 0x01],                 // {"1": 1}
+            &[0xa1, 0xf9, 0x3c, 0x00, 0x01],           // {1.0: 1}
+            &[0xd9, 0xd9, 0xf7, 0xa0],                 // 55799({})
+        ] {
+            assert_eq!(
+                check_encoded_types(payload),
+                Err(Reason::Malformed),
+                "{payload:02x?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_defined_values_of_another_major_type() {
+        for payload in [
+            &[0xa1, 0x01, 0x41, b'a'][..],   // {1: h'61'}
+            &[0xa1, 0x01, 0xf6],             // {1: null}
+            &[0xa1, 0x02, 0x81, 0x00],       // {2: [0]}
+            &[0xa1, 0x02, 0x61, b'a'],       // {2: "a"}
+            &[0xa1, 0x03, 0xf6],             // {3: null}
+            &[0xa1, 0x03, 0xc2, 0x41, 0x40], // {3: 2(h'40')}
+            &[0xa1, 0x03, 0xd9, 0xd9, 0xf7, 0x18, 0x40],
+            &[0xa1, 0x04, 0x20],                   // {4: -1}
+            &[0xa1, 0x05, 0xf7],                   // {5: undefined}
+            &[0xa1, 0x06, 0x43, b'm', b't', b'a'], // {6: h'6d7461'}
+        ] {
+            assert_eq!(
+                check_encoded_types(payload),
+                Err(Reason::Malformed),
+                "{payload:02x?}"
+            );
+        }
+    }
 
     #[test]
     fn accepts_ordinary_operator_domains() {
