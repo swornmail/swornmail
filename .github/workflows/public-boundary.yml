@@ -102,11 +102,20 @@ jobs:
           # which is the point of a test vector.
           patterns='AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[0-9A-Za-z-]{10,}|postgres(ql)?://[^ "]*:[^ "@]*@'
 
-          if git grep -nIE "$patterns" -- . \
+          # git grep exits 1 for no match and higher when it could not run;
+          # only 1 is a clean tree.
+          rc=0
+          git grep -nIE "$patterns" -- . \
                ':!.github/workflows/public-boundary.yml' \
-               ':!test-vectors/**' ':!**/testdata/**' > /tmp/creds; then
+               ':!test-vectors/**' ':!**/testdata/**' > /tmp/creds || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "::error::possible credential committed to a PUBLIC repository"
-            cat /tmp/creds
+            # Locations only: printing the match would copy the credential
+            # into a public log that outlives the fix.
+            cut -d: -f1,2 /tmp/creds
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "::error::the scan did not run, so nothing was checked"
             exit 1
           fi
           echo "no credential patterns"
@@ -116,10 +125,17 @@ jobs:
           # SwornMail has no public deployments. If that changes, the copy
           # should change because Val decided it, not because a marketing
           # phrase drifted in from a template.
-          if git grep -nIE 'trusted by|used by [0-9]|our customers|thousands of' -- . \
-               ':!.github/workflows/public-boundary.yml' > /tmp/claims; then
+          # git grep exits 1 for no match and higher when it could not run;
+          # only 1 is a clean tree.
+          rc=0
+          git grep -nIE 'trusted by|used by [0-9]|our customers|thousands of' -- . \
+               ':!.github/workflows/public-boundary.yml' > /tmp/claims || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "::error::public material implies adoption that does not exist"
             cat /tmp/claims
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "::error::the scan did not run, so nothing was checked"
             exit 1
           fi
           echo "no unsupported adoption claims"
