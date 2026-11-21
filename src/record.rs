@@ -105,7 +105,8 @@ pub struct PolicyRecord {
     /// the operator domain nor a subdomain of it, the draft requires the
     /// receiver to confirm consent before sending anything: query
     /// `<operator-domain>._report._sworn.<rua-domain>` for a TXT record
-    /// containing `v=SWORN1`, and send nothing if it is absent. Without that
+    /// beginning with `v=SWORN1`, and send nothing if it is absent or if
+    /// that name is longer than DNS allows (253 octets). Without that
     /// check a policy record can aim a receiver's reports at a mailbox of
     /// the publisher's choosing.
     pub rua: Option<String>,
@@ -360,14 +361,18 @@ mod tests {
     fn every_decodable_key_is_44_characters() {
         let engine = base64::engine::general_purpose::STANDARD;
         assert_eq!(engine.encode([0xffu8; 32]).len(), ED25519_PK_ENCODED_LEN);
+        let mut decoded = 0;
         for len in 0..=96 {
             for padding in 0..=3 {
                 let value = format!("{}{}", "A".repeat(len), "=".repeat(padding));
                 if engine.decode(&value).is_ok_and(|raw| raw.len() == 32) {
                     assert_eq!(value.len(), ED25519_PK_ENCODED_LEN, "{value:?}");
+                    decoded += 1;
                 }
             }
         }
+        // Without this the loop could pass by decoding nothing at all.
+        assert_eq!(decoded, 1, "exactly one sampled spelling is a 32-octet key");
     }
 
     #[test]
