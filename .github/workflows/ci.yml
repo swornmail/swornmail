@@ -1,0 +1,96 @@
+name: CI
+
+# Formatting, lints and the test suite, on stable and on the oldest toolchain
+# the crate declares support for.
+#
+# The specification repository is checked out beside the crate because the
+# tests read the shared conformance vectors from ../swornmail-spec. Without
+# it they fall back to the vendored snapshot under tests/testdata/ and the
+# test that compares the two returns early, so a stale snapshot would pass.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Both repositories are checked out into subdirectories of the workspace, so
+# that ../swornmail-spec resolves from the crate. A checkout cannot be placed
+# outside the workspace, which rules out leaving the crate at its root.
+defaults:
+  run:
+    working-directory: swornmail
+
+jobs:
+  test:
+    name: fmt, clippy, test (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: swornmail
+          persist-credentials: false
+
+      - uses: actions/checkout@v7
+        with:
+          repository: swornmail/spec
+          path: swornmail-spec
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Shared vectors are present
+        # Fails loudly if the spec layout moves, instead of letting the suite
+        # run against the vendored snapshot alone and report success.
+        run: test -f ../swornmail-spec/test-vectors/v1.json
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Cargo.lock is not committed, so there is nothing for --locked to hold
+      # the build to.
+      - name: Test
+        run: cargo test
+
+  msrv:
+    name: test (rust-version)
+    runs-on: ubuntu-latest
+    env:
+      # With no committed lockfile, dependencies are resolved on every run.
+      # Prefer versions whose own rust-version this toolchain satisfies, so a
+      # dependency raising its minimum does not fail a check that is about
+      # this crate's.
+      CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: swornmail
+          persist-credentials: false
+
+      - uses: actions/checkout@v7
+        with:
+          repository: swornmail/spec
+          path: swornmail-spec
+          persist-credentials: false
+
+      - name: Install the declared rust-version
+        # Read from Cargo.toml so the manifest stays the one place it is set.
+        run: |
+          msrv="$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)"
+          test -n "$msrv"
+          rustup toolchain install "$msrv" --profile minimal
+          rustup default "$msrv"
+
+      - name: Shared vectors are present
+        run: test -f ../swornmail-spec/test-vectors/v1.json
+
+      - name: Test
+        run: cargo test

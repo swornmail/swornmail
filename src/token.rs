@@ -118,6 +118,10 @@ pub struct Verified {
     /// cryptographic result with this flag must be reported as `sworn=none`.
     pub testing: bool,
     /// Aggregate report destination from the authorizing policy.
+    ///
+    /// It is the destination the operator requested, not one cleared for
+    /// sending. A mailbox outside the operator domain needs the DNS consent
+    /// check described on [`PolicyRecord::rua`] before any report goes to it.
     pub rua: Option<String>,
 }
 

@@ -3,12 +3,15 @@
 
 use base64::Engine as _;
 use core::fmt;
+use std::collections::HashSet;
 
 use crate::address::Ipv6Prefix;
 use crate::key::Ed25519PublicKey;
 
 /// Version tag value every SwornMail record must carry first.
 pub const VERSION: &str = "SWORN1";
+/// Length of a `pk=` value for `k=ed25519`: 32 octets in padded base64.
+const ED25519_PK_ENCODED_LEN: usize = 44;
 /// Largest number of prefixes a policy record may enumerate; the rest are
 /// ignored rather than treated as an error.
 pub const MAX_POLICY_PREFIXES: usize = 64;
@@ -69,6 +72,14 @@ impl KeyRecord {
             return Err(RecordError::UnknownAlgorithm);
         }
         let encoded = get(&tags, "pk").ok_or(RecordError::MissingTag("pk"))?;
+        // The record is untrusted DNS text, so the length is checked before
+        // any decoding work is spent on it. This refuses nothing the decoder
+        // and the key-length check below would not: the decoder requires
+        // canonical padding and admits no whitespace, so 32 octets have
+        // exactly one accepted spelling and it is 44 characters long.
+        if encoded.len() != ED25519_PK_ENCODED_LEN {
+            return Err(RecordError::BadValue("pk"));
+        }
         let raw = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .map_err(|_| RecordError::BadValue("pk"))?;
@@ -87,6 +98,17 @@ pub struct PolicyRecord {
     /// Whether `t=` carries the `y` (testing) flag.
     pub testing: bool,
     /// Aggregate report destination, `mailto:` only.
+    ///
+    /// This is where the operator asks for reports to go; it is the
+    /// operator's request and nothing more. The value is syntax-checked
+    /// here, never checked for consent. When the mailbox domain is neither
+    /// the operator domain nor a subdomain of it, the draft requires the
+    /// receiver to confirm consent before sending anything: query
+    /// `<operator-domain>._report._sworn.<rua-domain>` for a TXT record
+    /// beginning with `v=SWORN1`, and send nothing if it is absent or if
+    /// that name is longer than DNS allows (253 octets). Without that
+    /// check a policy record can aim a receiver's reports at a mailbox of
+    /// the publisher's choosing.
     pub rua: Option<String>,
 }
 
@@ -193,6 +215,10 @@ fn parse_tags(txt: &str) -> Result<Vec<(&str, &str)>, RecordError> {
         return Err(RecordError::MalformedTag);
     }
     let mut tags: Vec<(&str, &str)> = Vec::new();
+    // Names seen so far, in a set rather than found by rescanning `tags`: the
+    // record is untrusted, and comparing every tag with every earlier one is
+    // quadratic work in the number of tags a publisher chooses to send.
+    let mut seen: HashSet<&str> = HashSet::new();
     for segment in txt.split(';') {
         let segment = segment.trim();
         if segment.is_empty() {
@@ -207,7 +233,7 @@ fn parse_tags(txt: &str) -> Result<Vec<(&str, &str)>, RecordError> {
         if name.is_empty() || value.bytes().any(|c| c == b' ' || c == b'\t') {
             return Err(RecordError::MalformedTag);
         }
-        if tags.iter().any(|(seen, _)| *seen == name) {
+        if !seen.insert(name) {
             return Err(RecordError::DuplicateTag);
         }
         tags.push((name, value));
@@ -283,6 +309,87 @@ mod tests {
             KeyRecord::parse("v=SWORN1; k=ed25519; pk=AAAA").unwrap_err(),
             RecordError::BadValue("pk")
         );
+    }
+
+    // The length gate ahead of the decoder must refuse nothing the decoder
+    // accepted: each of these was already an invalid pk, and stays one.
+    #[test]
+    fn rejects_pk_values_that_cannot_be_a_padded_key() {
+        let key = &PK["pk=".len()..];
+        let engine = base64::engine::general_purpose::STANDARD;
+        let long = "A".repeat(4096);
+        for value in [
+            "",
+            "=",
+            "AAAA",
+            // The same key without its padding: 43 characters.
+            key.trim_end_matches('='),
+            // 30 and 34 octets, correctly padded: 40 and 48 characters.
+            &engine.encode([0u8; 30]),
+            &engine.encode([0u8; 34]),
+            // The key with a further padded group appended.
+            &format!("{key}AA=="),
+            &long,
+        ] {
+            assert_ne!(value.len(), ED25519_PK_ENCODED_LEN, "{value:?}");
+            // What the decoder alone made of it before the gate existed.
+            assert!(
+                engine.decode(value).map_or(true, |raw| raw.len() != 32),
+                "decoder alone accepts {value:?} as a key"
+            );
+            assert_eq!(
+                KeyRecord::parse(&format!("v=SWORN1; k=ed25519; pk={value}")).unwrap_err(),
+                RecordError::BadValue("pk"),
+                "{value:?}"
+            );
+        }
+        // 31 and 33 octets are also 44 characters, so they pass the gate and
+        // are still refused by the key-length check behind it.
+        for raw in [&[0u8; 31][..], &[0u8; 33]] {
+            let value = engine.encode(raw);
+            assert_eq!(value.len(), ED25519_PK_ENCODED_LEN);
+            assert_eq!(
+                KeyRecord::parse(&format!("v=SWORN1; k=ed25519; pk={value}")).unwrap_err(),
+                RecordError::BadValue("pk")
+            );
+        }
+    }
+
+    // The other direction: every spelling the decoder reads as 32 octets is
+    // 44 characters, so the gate cannot have turned an accepted key away.
+    #[test]
+    fn every_decodable_key_is_44_characters() {
+        let engine = base64::engine::general_purpose::STANDARD;
+        assert_eq!(engine.encode([0xffu8; 32]).len(), ED25519_PK_ENCODED_LEN);
+        let mut decoded = 0;
+        for len in 0..=96 {
+            for padding in 0..=3 {
+                let value = format!("{}{}", "A".repeat(len), "=".repeat(padding));
+                if engine.decode(&value).is_ok_and(|raw| raw.len() == 32) {
+                    assert_eq!(value.len(), ED25519_PK_ENCODED_LEN, "{value:?}");
+                    decoded += 1;
+                }
+            }
+        }
+        // Without this the loop could pass by decoding nothing at all.
+        assert_eq!(decoded, 1, "exactly one sampled spelling is a 32-octet key");
+    }
+
+    #[test]
+    fn detects_a_duplicate_tag_among_many() {
+        let many: String = (0..2000).map(|i| format!("; x{i}=1")).collect();
+        assert!(PolicyRecord::parse(&format!("v=SWORN1{many}")).is_ok());
+        // First and last tag of a long record, and a repeated version tag.
+        assert_eq!(
+            PolicyRecord::parse(&format!("v=SWORN1; u=64{many}; u=64")).unwrap_err(),
+            RecordError::DuplicateTag
+        );
+        assert_eq!(
+            PolicyRecord::parse(&format!("v=SWORN1{many}; v=SWORN1")).unwrap_err(),
+            RecordError::DuplicateTag
+        );
+        // Names differing only in case are distinct, as before.
+        assert!(PolicyRecord::parse("v=SWORN1; x=1; X=1").is_ok());
     }
 
     #[test]
