@@ -26,6 +26,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: No private-side identifiers
+        env:
+          PRIVATE_IDENTIFIERS: ${{ secrets.PRIVATE_IDENTIFIERS }}
+          FROM_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           # Names that exist only on the commercial side. Any occurrence in a
           # public repository is a boundary failure.
@@ -35,15 +38,56 @@ jobs:
           # Apache licence text contains "commercial damages"; banning the
           # vocabulary would produce noise, not safety. No company name appears
           # in public material at all as of 2026-08-28 — the maintainer credit
-          # is personal. Only the org slug is treated as private-side.
-          patterns='sworn-feed|sworn_feed|sworn\.platops\.com|platops-security|SWORN_FEED_|submitter-keys'
+          # is personal.
+          patterns='sworn-feed|sworn_feed|SWORN_FEED_|submitter-keys'
 
-          if git grep -nIE "$patterns" -- . ':!.github/workflows/public-boundary.yml' > /tmp/hits; then
+          # The rest of the private-side names are in a repository secret, so
+          # this file does not publish them itself; a secret, unlike a
+          # variable, is also masked in these public logs. On main and on
+          # branches of this repository a missing secret fails the check: an
+          # unset secret must not read as "nothing to find". A pull request
+          # from a fork never receives secrets, so there only the names above
+          # are checked, and the run on main after merge checks the rest.
+          if [ -n "$PRIVATE_IDENTIFIERS" ]; then
+            # The secret is typed by hand, so it is checked before it is
+            # trusted. A stray "|" or newline leaves an empty alternative,
+            # which matches every line; and the names it holds must not have
+            # found their way back into this file, which the scan below skips.
+            if printf '\n' | grep -qE -- "$PRIVATE_IDENTIFIERS"; then
+              echo "::error::PRIVATE_IDENTIFIERS matches an empty line; check it for a stray | or newline"
+              exit 1
+            fi
+            if grep -qE -- "$PRIVATE_IDENTIFIERS" .github/workflows/public-boundary.yml; then
+              echo "::error::a name held in PRIVATE_IDENTIFIERS appears in this workflow file"
+              exit 1
+            fi
+            patterns="$patterns|$PRIVATE_IDENTIFIERS"
+          elif [ "$FROM_FORK" = "true" ]; then
+            echo "::notice::pull request from a fork: only the names in this file were checked"
+          else
+            echo "::error::the PRIVATE_IDENTIFIERS secret is not set, so the boundary cannot be checked"
+            exit 1
+          fi
+
+          # Tracked files only, skipping this workflow, which names what it
+          # looks for. git grep exits 1 for no match and higher for a pattern
+          # that does not compile; only 1 is a clean tree. Treating every
+          # failure as "nothing found" would let a mistyped secret switch the
+          # whole check off.
+          rc=0
+          git grep -nIE "$patterns" -- . ':!.github/workflows/public-boundary.yml' > /tmp/hits || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "::error::private-side identifiers found in a PUBLIC repository"
-            cat /tmp/hits
+            # Locations only. The matched text is exactly what must not be
+            # printed into a public log, and masking covers the secret as a
+            # whole, not the one name that matched.
+            cut -d: -f1,2 /tmp/hits
             echo
             echo "The feed, its console, and anything behind a paid tier or login"
-            echo "belong in a private repo under the commercial org."
+            echo "belong in a private repo."
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "::error::the boundary pattern did not compile, so nothing was checked"
             exit 1
           fi
           echo "no private-side identifiers"
